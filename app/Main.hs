@@ -3,17 +3,12 @@
 module Main where
 import qualified Data.DList as D
 import qualified Data.Map as M
--- import Data.List ( intercalate, sortBy )
-import Data.List 
+import Data.List
+import Data.Char ( toLower, isLower )
 import Data.Function (on)
 import System.Environment (getArgs)
-import Data.Char ( toLower, isLower )
+import System.Directory
 import Control.Parallel
--- import Control.Parallel.Strategies
--- import Control.Applicative
--- import qualified Control.Monad.Par.IO as P
-import qualified Data.Set as Set
-import Data.Maybe
 
 {-
  - basically what this program does is take in a word list representing all of
@@ -30,48 +25,6 @@ import Data.Maybe
 -}
 
 
--- dropwhile :: (a -> Bool) -> [a] -> [a]
--- dropwhile _ [] = []
--- dropwhile p (x:xs)
---     | p x       = dropwhile p xs
---     | otherwise = x:xs
-
--- dropwhile' :: (a -> Bool) -> [a] -> [a]
--- dropwhile' p l = foldr f l l where
---     f x a | p x       = tail a
---           | otherwise = l
-
-
--- nubOrd :: (Ord a) => [a] -> [a]
--- nubOrd = go Set.empty where
---   go s (x:xs)
---    | x `Set.member` s = go s xs
---    | otherwise        = x : go (Set.insert x s) xs
---   go _ _              = []
-
-
--- subtractMap :: (Ord k) => M.Map k Int -> M.Map k Int -> M.Map k Int
--- subLetter :: CharCombo -> CharCombo -> CharCombo
--- sub1 :: Char -> CharCombo -> CharCombo
--- sub1 = M.update f where
---     f x | x > 1     = Just (x - 1)
---         | otherwise = Nothing
-
-
--- insert' :: Ord a => a -> [a] -> [a]
--- insert' y [] = [y]
--- insert' y (x:xs)
---     | y < x     = x:insert y xs
---     | otherwise = y:x:xs
-
--- insert :: Ord a => a -> [a] -> [a]
--- insert x = foldr f [x] where
---     f y acc | x < y     = y : acc
---             | otherwise = x : y : acc
-
--- insort :: Ord a => [a] -> [a]
--- insort = foldr insert' []
-
 type CharCombo = M.Map Char Int
 
 fixWord :: String -> String
@@ -83,10 +36,6 @@ countChars = M.fromListWith (+) . map (,1) . fixWord
 
 contains :: CharCombo -> CharCombo -> Bool
 a `contains` b = M.isSubmapOfBy (<=) b a
--- a `contains` b = M.foldrWithKey f True b where
---     f k v acc = acc && case M.lookup k a of
---         Just v' -> v' >= v
---         _       -> False
 
 -- subtractMap :: (Ord k) => M.Map k Int -> M.Map k Int -> M.Map k Int
 subtractMap :: CharCombo -> CharCombo -> CharCombo
@@ -98,8 +47,7 @@ subtractMap = M.differenceWith f where
 sortByLen :: [CharCombo] -> [CharCombo]
 sortByLen = sortBy (compare `on` (negate . sum))
 
--- this produces a difference list of all of the valid combinations of
--- CharCombos in the wordlist that combine to make a target CharCombo
+-- this produces a difference list of all of the valid combinations of CharCombos in the wordlist that combine to make the target
 comboCombos :: CharCombo -> [CharCombo] -> [CharCombo] -> D.DList [CharCombo]
 comboCombos (M.null -> True) _ combo = D.singleton $ reverse combo
 comboCombos _ [] _= D.empty
@@ -107,7 +55,7 @@ comboCombos target (w:ws) combo = comboCombos ntarget nws (w:combo) <> comboComb
     ntarget = target `subtractMap` w
     nws = filter (ntarget `contains`) (w:ws)
 
--- this produces a list of all the anagrams of a word using a wordlist
+-- this produces a list of all the extended anagrams of a word using a wordlist
 anagrams :: String -> [String] -> [[String]]
 anagrams word wordlist = concatMap (mapM (wordmap M.!)) combos where
     target = countChars word
@@ -119,6 +67,7 @@ anagrams word wordlist = concatMap (mapM (wordmap M.!)) combos where
 
 
 -- this does the same thing as comboCombos but in parallel
+-- running in parallel does not increase performance much while using a lot more resources
 parComboCombos :: CharCombo -> [CharCombo] -> [CharCombo] -> D.DList [CharCombo]
 parComboCombos (M.null -> True) _ combo = D.singleton $ reverse combo
 parComboCombos _ [] _= D.empty
@@ -131,9 +80,10 @@ parComboCombos target (w:ws) combo = include `par` exclude `pseq` (include <> ex
     exclude = parComboCombos target ws combo
 
 
--- parAnagrams word wordlist = concat $ fmap (traverse (wordmap M.!)) $ parComboCombos target keys [] where
--- this produces a list of all the anagrams of a word using a wordlist
+-- does the same thing as anagrams but in parallel
 parAnagrams :: String -> [String] -> [[String]]
+-- testing various versions where parAnagrams is also parallel. none really ended up gaining much (if any) performance
+-- parAnagrams word wordlist = concat $ fmap (traverse (wordmap M.!)) $ parComboCombos target keys [] where
 -- parAnagrams word wordlist =  concat $ parMap rpar (traverse (wordmap M.!)) combos where
 parAnagrams word wordlist = concatMap (traverse (wordmap M.!)) combos where -- `using` parListChunk 8 rdeepseq where
     target = countChars word
@@ -145,7 +95,7 @@ parAnagrams word wordlist = concatMap (traverse (wordmap M.!)) combos where -- `
     combos = parComboCombos target keys []
 
 
--- this does the same thing as anagrams, except it just prints them because it's faster
+-- this does the same thing as anagrams, except it just prints them instead of making a list because it's faster
 anagramPrinter :: String -> [String] -> IO ()
 anagramPrinter s wordlist = mf target keys [] where
     target = countChars s
@@ -169,18 +119,46 @@ printAnagramsInline file word = readFile file >>= putStr . unwords . intercalate
 printAnagramsParallel :: FilePath -> String -> IO ()
 printAnagramsParallel file word = readFile file >>= mapM_ (putStrLn . unwords) . parAnagrams word . words
 
-text :: IO [String]
-text = words <$> readFile defaultFile
+-- text :: IO [String]
+-- text = words <$> readFile defaultFile
 
-defaultFile :: String
-defaultFile = "/home/josh/.local/bin/words.txt"
+defaultPath :: String
+defaultPath = ".local/bin/words.txt"
+
+
+-- printHelp :: IO ()
+-- printHelp = putStrLn "Usage: anagrams [-f <wordfile>] <word>"
 
 printHelp :: IO ()
-printHelp = putStrLn "Usage: anagrams [-f <wordfile>] <word>"
+printHelp = mapM_ putStrLn
+    [ "Anagram Finder - finds extended anagrams for a given input"
+    , ""
+    , "Usage:"
+    , "  anagrams [OPTIONS] [WORD]"
+    , ""
+    , "Options:"
+    , "  -h           Show this help message"
+    , "  -f FILE      Use custom dictionary file (default: ~/.local/bin/words.txt)"
+    , "  -l           Print results inline with '|' separator"
+    , "  -p           Use parallel processing for computation"
+    , ""
+    , "Examples:"
+    , "  anagrams listen              # Find anagrams of 'listen' using default dictionary"
+    , "  anagrams -f mydict.txt stop  # Find anagrams of 'stop' using custom dictionary"
+    , "  anagrams -l silent           # Find anagrams of 'silent' and print inline"
+    , "  echo \"stop\" | anagrams     # Read word from standard input"
+    , ""
+    , "Notes:"
+    , "  - Without a WORD argument, the program reads from standard input"
+    , "  - The -l option is useful for parsing output in scripts"
+    , "  - The -p option may improve performance on larger words but will probably just use a lot more memory"
+    ]
 
 main :: IO ()
 main = do
+    home <- getHomeDirectory
     args <- getArgs
+    let defaultFile = home ++ defaultPath
     case args of
         ["-h"]       -> printHelp
         ["-f", f, s] -> printAnagrams f s
@@ -192,3 +170,4 @@ main = do
         ["-p", s]    -> printAnagramsParallel defaultFile s
         [s]          -> printAnagrams defaultFile s
         _            -> printHelp
+
