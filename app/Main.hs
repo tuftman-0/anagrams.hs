@@ -3,12 +3,12 @@
 module Main where
 import qualified Data.DList as D
 import qualified Data.Map as M
-import Data.List
+import Data.List ( intercalate, sortBy )
 import Data.Char ( toLower, isLower )
 import Data.Function (on)
 import System.Environment (getArgs)
-import System.Directory
-import Control.Parallel
+import System.Directory ( getHomeDirectory )
+import Control.Parallel ( par, pseq )
 
 {-
  - basically what this program does is take in a word list representing all of
@@ -97,15 +97,15 @@ parAnagrams word wordlist = concatMap (traverse (wordmap M.!)) combos where -- `
 
 -- this does the same thing as anagrams, except it just prints them instead of making a list because it's faster
 anagramPrinter :: String -> [String] -> IO ()
-anagramPrinter s wordlist = mf target keys [] where
+anagramPrinter s wordlist = combos target keys [] where
     target = countChars s
     wordmap = M.fromListWith (++) [(cx, [x]) | x <- wordlist ,let cx = countChars x ,target `contains` cx]
     keys = sortByLen $ M.keys wordmap
-    mf (M.null -> True) _ combo = mapM_ (putStrLn . unwords) $ mapM (wordmap M.!) $ reverse combo
-    mf _ [] _ = return ()
-    mf t (w:ws) combo = do
-        mf nt nps (w:combo)
-        mf t ws combo
+    combos (M.null -> True) _ combo = mapM_ (putStrLn . unwords) $ mapM (wordmap M.!) $ reverse combo
+    combos _ [] _ = return ()
+    combos t (w:ws) combo = do
+        combos nt nps (w:combo)
+        combos t ws combo
         where
             nt = t `subtractMap` w
             nps = filter (nt `contains`) (w : ws)
