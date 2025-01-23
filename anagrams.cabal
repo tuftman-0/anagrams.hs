@@ -71,9 +71,7 @@ executable anagrams
                     , containers
                     , dlist
                     , parallel
-                    , bytestring
-                    --, bytestring-trie
-                    --, monad-par
+                    , directory
 
     -- Directories containing source files.
     hs-source-dirs:   app
