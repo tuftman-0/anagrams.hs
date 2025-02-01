@@ -158,7 +158,7 @@ main :: IO ()
 main = do
     home <- getHomeDirectory
     args <- getArgs
-    let defaultFile = home ++ defaultPath
+    let defaultFile = home ++ "/" ++ defaultPath
     case args of
         ["-h"]       -> printHelp
         ["-f", f, s] -> printAnagrams f s
