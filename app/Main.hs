@@ -3,7 +3,8 @@
 module Main where
 import qualified Data.DList as D
 import qualified Data.Map as M
-import Data.List ( intercalate, sortBy )
+-- import Data.List ( intercalate, sortBy, group )
+import Data.List
 import Data.Char ( toLower, isLower )
 import Data.Function (on)
 import System.Environment (getArgs)
@@ -47,6 +48,42 @@ subtractMap = M.differenceWith f where
 sortByLen :: [CharCombo] -> [CharCombo]
 sortByLen = sortBy (compare `on` (negate . sum))
 
+
+-- | Expand one combination of CharCombos (e.g. [cx, cx, cy, cz, cz])
+--   into the actual word-lists, avoiding duplicates like ["he","eh"] vs ["eh","he"].
+expandGroupedCombo :: M.Map CharCombo [String] -> [CharCombo] -> [[String]]
+expandGroupedCombo wordmap combos = map concat (sequence picksPerGroup)
+  where
+      -- Group identical combos and count how many times each appears
+      grouped :: [(CharCombo, Int)]
+      grouped = map (\g -> (head g, length g)) . group $ combos
+
+      -- For each (combo, count), pick 'count' words in a combination sense
+      picksPerGroup :: [[[String]]]
+      picksPerGroup = map (uncurry (pickWordsIgnoreOrder wordmap)) grouped
+        -- Each element of picksPerGroup is a list of lists-of-strings, e.g.
+        --   [["he","he"],["he","eh"],["eh","eh"]] for (cx,2).
+      -- 'sequence' on a list of lists is a cartesian product.
+      -- Then we 'concat' each choice to flatten from [[ [String] ]] to [[String]].
+
+
+-- | Given a particular CharCombo and a count 'n', generate all
+--   "combinations with repetition" of size 'n' from the words
+--   that match that CharCombo (ignoring order).
+pickWordsIgnoreOrder :: M.Map CharCombo [String] -> CharCombo -> Int -> [[String]]
+pickWordsIgnoreOrder wordmap combo n = combinationsWithRepetition n ws where ws = M.findWithDefault [] combo wordmap
+
+-- | Standard "combinations with repetition" over a list.
+--   For example, if n=2 and list=["he","eh"], we get:
+--     [["he","he"], ["he","eh"], ["eh","eh"]]
+--   (We do NOT produce ["eh","he"] again because order is ignored.)
+combinationsWithRepetition :: Int -> [a] -> [[a]]
+combinationsWithRepetition 0 _      = [[]]
+combinationsWithRepetition _ []     = []
+combinationsWithRepetition n (x:xs) =
+    map (x:) (combinationsWithRepetition (n-1) (x:xs))    -- Option 1: include x at least once
+    ++ combinationsWithRepetition n xs    -- Option 2: skip x entirely
+
 -- this produces a difference list of all of the valid combinations of CharCombos in the wordlist that combine to make the target
 comboCombos :: CharCombo -> [CharCombo] -> [CharCombo] -> D.DList [CharCombo]
 comboCombos (M.null -> True) _ combo = D.singleton $ reverse combo
@@ -57,7 +94,20 @@ comboCombos target (w:ws) combo = comboCombos ntarget nws (w:combo) <> comboComb
 
 -- this produces a list of all the extended anagrams of a word using a wordlist
 anagrams :: String -> [String] -> [[String]]
-anagrams word wordlist = concatMap (mapM (wordmap M.!)) combos where
+anagrams word wordlist = concatMap (mapM (wordmap M.!)) combos
+  where
+    target = countChars word
+    wordmap = M.fromListWith (++) [(cx, [x]) | x <- wordlist
+                                   ,let cx = countChars x
+                                   ,target `contains` cx]
+    keys = sortByLen $ M.keys wordmap
+    combos = comboCombos target keys []
+
+
+-- this produces a list of all the extended anagrams of a word using a wordlist
+anagrams' :: String -> [String] -> [[String]]
+anagrams' word wordlist = concatMap (expandGroupedCombo wordmap) combos
+  where
     target = countChars word
     wordmap = M.fromListWith (++) [(cx, [x]) | x <- wordlist
                                    ,let cx = countChars x
@@ -95,9 +145,10 @@ parAnagrams word wordlist = concatMap (traverse (wordmap M.!)) combos where -- `
     combos = parComboCombos target keys []
 
 
+
 -- this does the same thing as anagrams, except it just prints them instead of making a list because it's faster
-anagramPrinter :: String -> [String] -> IO ()
-anagramPrinter s wordlist = combos target keys [] where
+anagramPrinter' :: String -> [String] -> IO ()
+anagramPrinter' s wordlist = combos target keys [] where
     target = countChars s
     wordmap = M.fromListWith (++) [(cx, [x]) | x <- wordlist ,let cx = countChars x ,target `contains` cx]
     keys = sortByLen $ M.keys wordmap
@@ -109,6 +160,23 @@ anagramPrinter s wordlist = combos target keys [] where
         where
             nt = t `subtractMap` w
             nps = filter (nt `contains`) (w : ws)
+
+
+-- this does the same thing as anagrams, except it just prints them instead of making a list because it's faster
+anagramPrinter :: String -> [String] -> IO ()
+anagramPrinter s wordlist = combos target keys [] where
+    target = countChars s
+    wordmap = M.fromListWith (++) [(cx, [x]) | x <- wordlist ,let cx = countChars x ,target `contains` cx]
+    keys = sortByLen $ M.keys wordmap
+    combos (M.null -> True) _ combo = mapM_ (putStrLn . unwords) $ expandGroupedCombo wordmap $ reverse combo
+    combos _ [] _ = return ()
+    combos t (w:ws) combo = do
+        combos nt nps (w:combo)
+        combos t ws combo
+        where
+            nt = t `subtractMap` w
+            nps = filter (nt `contains`) (w : ws)
+
 
 printAnagrams :: FilePath -> String -> IO ()
 printAnagrams file word = readFile file >>= anagramPrinter word . words
@@ -124,6 +192,9 @@ printAnagramsParallel file word = readFile file >>= mapM_ (putStrLn . unwords) .
 
 defaultPath :: String
 defaultPath = ".local/bin/words.txt"
+
+file :: String
+file = "/home/josh/.local/bin/words.txt"
 
 
 -- printHelp :: IO ()
